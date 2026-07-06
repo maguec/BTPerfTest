@@ -14,6 +14,7 @@ resource "google_compute_instance" "vm" {
     "startup_script.sh",
     {
       projectid : var.gcp_project_id,
+      suffix : random_id.server.hex,
       region : join("-", slice(split("-", var.gcp_zone), 0, 2)),
     },
   )
