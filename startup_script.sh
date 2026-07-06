@@ -1,7 +1,7 @@
 echo "# Lab specific ENV vars" >> /etc/bash.bashrc
 echo "export GOOGLE_CLOUD_PROJECT=${projectid}"  >> /etc/bash.bashrc
 echo "export GOOGLE_CLOUD_LOCATION=${region}" >> /etc/bash.bashrc
-echo "export GOOGLE_BIGTABLE_INSANCE=bt-i-${suffix}" >> /etc/bash.bashrc
+echo "export GOOGLE_BIGTABLE_INSTANCE=bt-i-${suffix}" >> /etc/bash.bashrc
 echo "export PATH=$${PATH}:/tmp/google-cloud-sdk/bin" >> /etc/bash.bashrc
 
 echo "# Increase open files for running benchmarks" >> /etc/security/limits.conf
@@ -10,7 +10,7 @@ echo "* hard nofile 65535" >> /etc/security/limits.conf
 
 # Run this after as it takes time
 apt-get update
-apt-get install -y make btop
+apt-get install -y make btop golang-go
 
 # Install UV
 /usr/bin/curl -LsSf https://astral.sh/uv/install.sh | /usr/bin/sh
