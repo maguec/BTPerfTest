@@ -23,7 +23,8 @@ cbt -project ${GOOGLE_CLOUD_PROJECT} -instance ${GOOGLE_BIGTABLE_INSANCE} ls
 
 ```bash
 git clone https://github.com/maguec/BTPerfTest
-cd BTPerfTest
+cd BTPerfTest/Code
+
 ```
 
 ### Run the benchmark
