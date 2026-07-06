@@ -24,6 +24,7 @@ var args struct {
 	RPS          int    `help:"Number of updates per second " default:"100" arg:"--rps, -r, env:BT_RPS"`
 	Records      int    `help:"Toal Number of records to write" default:"10000" arg:"--records, -w, env:BT_RECORDS"`
 	Threads      int    `help:"Number of threads to concurrent write" default:"10" arg:"--threads, -z, env:BT_THREADS"`
+	ExtraColumns int    `help:"Number of extra fields concurrent write" default:"0" arg:"--extra-fields, -e, env:BT_EXTRA_FIELDS"`
 	Verbose      bool   `help:"Show verbose output" default:"false" arg:"--verbose, -v, env:BT_VERBOSE"`
 	Stats        bool   `help:"Show latency stats" default:"true" arg:"--stats, -z, env:BTS_STATS"`
 }
@@ -68,7 +69,7 @@ func createTable(project, instance, table, columnFamily string) error {
 
 func writeWorker(
 	id int, jobs <-chan int, results chan<- time.Duration, rl ratelimit.Limiter, verbose bool,
-	mm *metermaid.Metermaid, project, instance, table, family string, bar *progressbar.ProgressBar) {
+	mm *metermaid.Metermaid, project, instance, table, family string, extra int, bar *progressbar.ProgressBar) {
 
 	if verbose {
 		log.Printf("Starting write worker: %d\n", id)
@@ -82,10 +83,16 @@ func writeWorker(
 	var muts []*bigtable.Mutation
 	for j := range jobs {
 		rl.Take()
-		startTime := time.Now()
 
 		muts = nil
 		mut := bigtable.NewMutation()
+		for x := range extra {
+			mut.Set(
+				family,
+				fmt.Sprintf("extra-%d", x),
+				bigtable.ServerTime, []byte(fmt.Sprintf("%d", j)))
+		}
+		startTime := time.Now()
 		mut.Set(family, "pop", bigtable.Timestamp(startTime.UnixMicro()), []byte(fmt.Sprintf("%d", j)))
 		mut.Set(family, "write", bigtable.ServerTime, []byte(fmt.Sprintf("%d", j)))
 		muts = append(muts, mut)
@@ -213,7 +220,7 @@ func main() {
 	bar := progressbar.Default(int64(args.Records))
 
 	for w := 1; w <= args.Threads; w++ {
-		go writeWorker(w, jobs, res, rl, args.Verbose, mm, args.Project, args.Instance, args.Table, args.ColumnFamily, bar)
+		go writeWorker(w, jobs, res, rl, args.Verbose, mm, args.Project, args.Instance, args.Table, args.ColumnFamily, args.ExtraColumns, bar)
 	}
 
 	for a := 0; a < args.Records; a++ {
