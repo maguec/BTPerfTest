@@ -6,7 +6,7 @@ resource "google_service_account" "lab_service_account" {
 
 resource "google_project_iam_binding" "project" {
   project = var.gcp_project_id
-  role    = "roles/bigtable.user"
+  role    = "roles/bigtable.admin"
 
   members = [
     "serviceAccount:${google_service_account.lab_service_account.email}"
