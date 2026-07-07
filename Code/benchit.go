@@ -29,6 +29,29 @@ var args struct {
 	Stats        bool   `help:"Show latency stats" default:"true" arg:"--stats, -z, env:BTS_STATS"`
 }
 
+func checkDirectAcess(projectID, instanceID string, verbose bool) bool {
+
+	ctx2 := context.Background()
+	appProfileID := "default"
+
+	isDirectPath, err := bigtable.CheckDirectAccessSupported(ctx2, projectID, instanceID, appProfileID)
+	if err != nil {
+		log.Fatalf("DirectPath check failed: %v", err)
+	}
+
+	if isDirectPath {
+		if verbose {
+			log.Printf("DirectPath connectivity is active for %s/%s", projectID, instanceID)
+		}
+		return true
+	} else {
+		if verbose {
+			log.Printf("DirectPath connectivity is NOT active for %s/%s", projectID, instanceID)
+		}
+	}
+	return false
+}
+
 func sliceContains(list []string, target string) bool {
 	for _, s := range list {
 		if s == target {
@@ -214,6 +237,7 @@ func main() {
 	}
 
 	if args.Verbose {
+		checkDirectAcess(args.Project, args.Instance, args.Verbose)
 		log.Printf("Writing of %d records started", args.Records)
 	}
 
