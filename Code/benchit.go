@@ -97,9 +97,13 @@ func writeWorker(
 	if verbose {
 		log.Printf("Starting write worker: %d\n", id)
 	}
-	client, err := bigtable.NewClient(ctx, project, instance)
+	isDirectAccessSupported := checkDirectAcess(project, instance, false)
+	clientConfig := bigtable.ClientConfig{
+		DisableDirectAccess: !isDirectAccessSupported,
+	}
+	client, err := bigtable.NewClientWithConfig(ctx, project, instance, clientConfig)
 	if err != nil {
-		log.Fatalf("bigtable.NewAdminClient: %v", err)
+		log.Fatalf("bigtable.DirectPathConnection: %v", err)
 	}
 	tbl := client.Open(table)
 
