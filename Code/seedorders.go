@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"time"
 
 	"cloud.google.com/go/bigtable"
@@ -81,6 +82,9 @@ func writeWorkerOrder(
 
 	var muts []*bigtable.Mutation
 
+	// Create a local random generator for this worker to avoid locking overhead
+	r := rand.New(rand.NewSource(time.Now().UnixNano() + int64(id)))
+
 	// Thread-specific loop generating exactly `recordsPerWriter` transactions
 	for j := 0; j < recordsPerWriter; j++ {
 		rl.Take()
@@ -88,13 +92,20 @@ func writeWorkerOrder(
 		muts = nil
 		mut := bigtable.NewMutation()
 
-		// Mock order data payload
-		createdTs := time.Now().UnixMilli()
+		// Random date over the last month (30 days)
+		nowMilli := time.Now().UnixMilli()
+		thirtyDaysMilli := int64(30 * 24 * 60 * 60 * 1000)
+		createdTs := nowMilli - r.Int63n(thirtyDaysMilli)
 		reversedTs := int64(^uint64(0)>>1) - createdTs // Long.MAX_VALUE - timestamp
-		merchantID := fmt.Sprintf("m_%d", id)          // Assigning specific merchants per thread
+
+		// Random merchant ID between 1 and 5000
+		merchantID := fmt.Sprintf("m_%d", r.Intn(5000)+1)
 		orderID := fmt.Sprintf("ord_%d_%d", id, j)
 
-		mut.Set(family, "amount", bigtable.Timestamp(createdTs*1000), []byte(fmt.Sprintf("%d", (j+1)*10)))
+		// Random transaction amount between 1 and 99
+		amountStr := fmt.Sprintf("%d", r.Intn(99)+1)
+
+		mut.Set(family, "amount", bigtable.Timestamp(createdTs*1000), []byte(amountStr))
 		mut.Set(family, "status", bigtable.Timestamp(createdTs*1000), []byte("completed"))
 		mut.Set(family, "created", bigtable.Timestamp(createdTs*1000), []byte(fmt.Sprintf("%d", createdTs)))
 
