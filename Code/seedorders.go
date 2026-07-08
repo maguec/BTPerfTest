@@ -18,17 +18,16 @@ import (
 var ctx = context.Background()
 
 var args struct {
-	Project          string `help:"GCP Project to use" default:"" arg:"--project, -p, env:GOOGLE_CLOUD_PROJECT"`
-	Instance         string `help:"BT Instance to use" default:"" arg:"--instance, -i, env:GOOGLE_BIGTABLE_INSTANCE"`
-	ColumnFamily     string `help:"BT Column Family to use" default:"" arg:"--column-family, -f, env:GOOGLE_BIGTABLE_COLUMN_FAMILY"`
-	Table            string `help:"BT Table to use" default:"" arg:"--table, -t, env:GOOGLE_BIGTABLE_TABLE"`
-	RPS              int    `help:"Number of updates per second " default:"100" arg:"--rps, -r, env:BT_RPS"`
-	Records          int    `help:"Total Number of records to write (legacy)" default:"10000" arg:"--records, env:BT_RECORDS"`
-	RecordsPerWriter int    `help:"Number of transactions each writer generates" default:"10" arg:"--records-per-writer, -w, env:BT_RECORDS_PER_WRITER"`
-	Threads          int    `help:"Number of threads to concurrent write" default:"10" arg:"--threads, -z, env:BT_THREADS"`
-	ExtraColumns     int    `help:"Number of extra fields concurrent write" default:"0" arg:"--extra-fields, -e, env:BT_EXTRA_FIELDS"`
-	Verbose          bool   `help:"Show verbose output" default:"false" arg:"--verbose, -v, env:BT_VERBOSE"`
-	Stats            bool   `help:"Show latency stats" default:"true" arg:"--stats, env:BTS_STATS"`
+	Project      string `help:"GCP Project to use" default:"" arg:"--project, -p, env:GOOGLE_CLOUD_PROJECT"`
+	Instance     string `help:"BT Instance to use" default:"" arg:"--instance, -i, env:GOOGLE_BIGTABLE_INSTANCE"`
+	ColumnFamily string `help:"BT Column Family to use" default:"" arg:"--column-family, -f, env:GOOGLE_BIGTABLE_COLUMN_FAMILY"`
+	Table        string `help:"BT Table to use" default:"" arg:"--table, -t, env:GOOGLE_BIGTABLE_TABLE"`
+	RPS          int    `help:"Number of updates per second " default:"100" arg:"--rps, -r, env:BT_RPS"`
+	Records      int    `help:"Total Number of records to write" default:"10000" arg:"--records, -w, env:BT_RECORDS"`
+	Threads      int    `help:"Number of threads to concurrent write" default:"10" arg:"--threads, -z, env:BT_THREADS"`
+	ExtraColumns int    `help:"Number of extra fields concurrent write" default:"0" arg:"--extra-fields, -e, env:BT_EXTRA_FIELDS"`
+	Verbose      bool   `help:"Show verbose output" default:"false" arg:"--verbose, -v, env:BT_VERBOSE"`
+	Stats        bool   `help:"Show latency stats" default:"true" arg:"--stats, env:BTS_STATS"`
 }
 
 func checkDirectAcess(projectID, instanceID string, verbose bool) bool {
@@ -64,11 +63,11 @@ func sliceContains(list []string, target string) bool {
 }
 
 func writeWorkerOrder(
-	id int, recordsPerWriter int, results chan<- time.Duration, rl ratelimit.Limiter, verbose bool,
+	id int, recordsToProcess int, results chan<- time.Duration, rl ratelimit.Limiter, verbose bool,
 	mm *metermaid.Metermaid, project, instance, table, family string, extra int, bar *progressbar.ProgressBar) {
 
 	if verbose {
-		log.Printf("Starting write worker: %d (Generating %d records)\n", id, recordsPerWriter)
+		log.Printf("Starting write worker: %d (Generating %d records)\n", id, recordsToProcess)
 	}
 	isDirectAccessSupported := checkDirectAcess(project, instance, false)
 	clientConfig := bigtable.ClientConfig{
@@ -85,8 +84,7 @@ func writeWorkerOrder(
 	// Create a local random generator for this worker to avoid locking overhead
 	r := rand.New(rand.NewSource(time.Now().UnixNano() + int64(id)))
 
-	// Thread-specific loop generating exactly `recordsPerWriter` transactions
-	for j := 0; j < recordsPerWriter; j++ {
+	for j := 0; j < recordsToProcess; j++ {
 		rl.Take()
 
 		muts = nil
@@ -163,11 +161,20 @@ func main() {
 
 	rl := ratelimit.New(args.RPS)
 
-	// Calculate actual total records based on threads and records per writer
-	totalRecords := args.Threads * args.RecordsPerWriter
+	// Calculate the distribution of records per thread
+	totalRecords := args.Records
+	basePerWriter := totalRecords / args.Threads
+	remainder := totalRecords % args.Threads
 
-	res := make(chan time.Duration, totalRecords)
-	tach := tachymeter.New(&tachymeter.Config{Size: totalRecords})
+	// Cap the tachymeter tracking array at 1M to prevent RAM exhaustion on massive runs
+	tachSize := totalRecords
+	if tachSize > 1000000 {
+		tachSize = 1000000
+	}
+
+	// Used a bounded channel instead of size 'totalRecords' to prevent OOM on 1B records
+	res := make(chan time.Duration, 100000)
+	tach := tachymeter.New(&tachymeter.Config{Size: tachSize})
 	mm := metermaid.New(&metermaid.Config{Size: totalRecords})
 
 	if args.Verbose {
@@ -178,10 +185,16 @@ func main() {
 	bar := progressbar.Default(int64(totalRecords))
 
 	for w := 1; w <= args.Threads; w++ {
-		go writeWorkerOrder(w, args.RecordsPerWriter, res, rl, args.Verbose, mm, args.Project, args.Instance, args.Table, args.ColumnFamily, args.ExtraColumns, bar)
+		// Distribute remainder records to the first few threads
+		recordsForThisWriter := basePerWriter
+		if w <= remainder {
+			recordsForThisWriter++
+		}
+		
+		go writeWorkerOrder(w, recordsForThisWriter, res, rl, args.Verbose, mm, args.Project, args.Instance, args.Table, args.ColumnFamily, args.ExtraColumns, bar)
 	}
 
-	// Read totalRecords dynamically instead of args.Records
+	// Process the results as they stream in
 	for a := 0; a < totalRecords; a++ {
 		r := <-res
 		tach.AddTime(r)
