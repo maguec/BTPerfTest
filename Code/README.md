@@ -34,8 +34,13 @@ gcloud bigtable materialized-views create orders_daily_metrics_mv \
 The following will bring a single node bigtable instance to 100% CPU usage
 ```bash
 go run seedorders.go --project ${GOOGLE_CLOUD_PROJECT} --instance ${GOOGLE_BIGTABLE_INSTANCE} --column-family=core --table orders --records 10000000  -r 10000 -z 250
-
 ```
+
+check the Count
+```bash
+cbt -project ${GOOGLE_CLOUD_PROJECT} -instance bt-i-f29db430f6487ba7 count orders
+```
+
 
 ### Read from the CMV
 
@@ -60,3 +65,16 @@ Date-Bounded Aggregations
 cbt -project ${GOOGLE_CLOUD_PROJECT} -instance ${GOOGLE_BIGTABLE_INSTANCE} sql "SELECT merchant_id, SUM(total_amount) AS window_volume FROM orders_daily_metrics_mv WHERE merchant_id = 'm_4' AND day >= '2026-06-01 00:00:00' AND day <= '2026-07-01 00:00:00' GROUP BY merchant_id"
 ```
 
+
+Date-Bounded Top 10 lists
+```bash
+cbt -project ${GOOGLE_CLOUD_PROJECT} -instance ${GOOGLE_BIGTABLE_INSTANCE} \
+  sql "SELECT 
+         merchant_id, 
+         SUM(total_amount) AS window_volume 
+       FROM orders_daily_metrics_mv 
+       WHERE day >= '2026-07-01 00:00:00' AND day < '2026-08-01 00:00:00' 
+       GROUP BY merchant_id 
+       ORDER BY window_volume DESC 
+       LIMIT 10"
+```
