@@ -18,19 +18,27 @@ import (
 var ctx = context.Background()
 
 var args struct {
-	Project      string `help:"GCP Project to use" default:"" arg:"--project, -p, env:GOOGLE_CLOUD_PROJECT"`
-	Instance     string `help:"BT Instance to use" default:"" arg:"--instance, -i, env:GOOGLE_BIGTABLE_INSTANCE"`
-	ColumnFamily string `help:"BT Column Family to use" default:"" arg:"--column-family, -f, env:GOOGLE_BIGTABLE_COLUMN_FAMILY"`
-	Table        string `help:"BT Table to use" default:"" arg:"--table, -t, env:GOOGLE_BIGTABLE_TABLE"`
-	RPS          int    `help:"Number of updates per second " default:"100" arg:"--rps, -r, env:BT_RPS"`
-	Records      int    `help:"Total Number of records to write" default:"10000" arg:"--records, -w, env:BT_RECORDS"`
-	Threads      int    `help:"Number of threads to concurrent write" default:"10" arg:"--threads, -z, env:BT_THREADS"`
-	ExtraColumns int    `help:"Number of extra fields concurrent write" default:"0" arg:"--extra-fields, -e, env:BT_EXTRA_FIELDS"`
-	Verbose      bool   `help:"Show verbose output" default:"false" arg:"--verbose, -v, env:BT_VERBOSE"`
-	Stats        bool   `help:"Show latency stats" default:"true" arg:"--stats, env:BTS_STATS"`
+	Project             string `help:"GCP Project to use" default:"" arg:"--project, -p, env:GOOGLE_CLOUD_PROJECT"`
+	Instance            string `help:"BT Instance to use" default:"" arg:"--instance, -i, env:GOOGLE_BIGTABLE_INSTANCE"`
+	ColumnFamily        string `help:"BT Column Family to use" default:"" arg:"--column-family, -f, env:GOOGLE_BIGTABLE_COLUMN_FAMILY"`
+	Table               string `help:"BT Table to use" default:"" arg:"--table, -t, env:GOOGLE_BIGTABLE_TABLE"`
+	RPS                 int    `help:"Number of updates per second " default:"100" arg:"--rps, -r, env:BT_RPS"`
+	Records             int    `help:"Total Number of records to write" default:"10000" arg:"--records, -w, env:BT_RECORDS"`
+	Threads             int    `help:"Number of threads to concurrent write" default:"10" arg:"--threads, -z, env:BT_THREADS"`
+	ExtraColumns        int    `help:"Number of extra fields concurrent write" default:"0" arg:"--extra-fields, -e, env:BT_EXTRA_FIELDS"`
+	Verbose             bool   `help:"Show verbose output" default:"false" arg:"--verbose, -v, env:BT_VERBOSE"`
+	Stats               bool   `help:"Show latency stats" default:"true" arg:"--stats, env:BTS_STATS"`
+	DisableDirectAccess bool   `help:"Disable Direct Access even if available" default:"false" arg:"--disable-direct-access, -d, env:BTS_DISABLE_DIRECT_ACCESS"`
 }
 
-func checkDirectAcess(projectID, instanceID string, verbose bool) bool {
+func checkDirectAcess(projectID, instanceID string, verbose, disableDirectAccess bool) bool {
+
+	if disableDirectAccess {
+		if verbose {
+			log.Printf("DirectPath short cirucuted by flag for %s/%s", projectID, instanceID)
+		}
+		return false
+	}
 
 	ctx2 := context.Background()
 	appProfileID := "default"
@@ -40,7 +48,7 @@ func checkDirectAcess(projectID, instanceID string, verbose bool) bool {
 		log.Fatalf("DirectPath check failed: %v", err)
 	}
 
-	if isDirectPath {
+	if isDirectPath && !disableDirectAccess {
 		if verbose {
 			log.Printf("DirectPath connectivity is active for %s/%s", projectID, instanceID)
 		}
@@ -69,7 +77,7 @@ func writeWorkerOrder(
 	if verbose {
 		log.Printf("Starting write worker: %d (Generating %d records)\n", id, recordsToProcess)
 	}
-	isDirectAccessSupported := checkDirectAcess(project, instance, false)
+	isDirectAccessSupported := checkDirectAcess(project, instance, false, args.DisableDirectAccess)
 	clientConfig := bigtable.ClientConfig{
 		DisableDirectAccess: !isDirectAccessSupported,
 	}
@@ -178,7 +186,7 @@ func main() {
 	mm := metermaid.New(&metermaid.Config{Size: totalRecords})
 
 	if args.Verbose {
-		checkDirectAcess(args.Project, args.Instance, args.Verbose)
+		checkDirectAcess(args.Project, args.Instance, args.Verbose, args.DisableDirectAccess)
 		log.Printf("Writing of %d records started", totalRecords)
 	}
 
@@ -190,7 +198,7 @@ func main() {
 		if w <= remainder {
 			recordsForThisWriter++
 		}
-		
+
 		go writeWorkerOrder(w, recordsForThisWriter, res, rl, args.Verbose, mm, args.Project, args.Instance, args.Table, args.ColumnFamily, args.ExtraColumns, bar)
 	}
 
