@@ -15,6 +15,9 @@ import (
 	"go.uber.org/ratelimit"
 )
 
+// Just hardcode this for now as it's only a test
+var UPDATE_PERCENTAGE = 84
+
 var ctx = context.Background()
 
 var args struct {
@@ -29,6 +32,7 @@ var args struct {
 	Verbose             bool   `help:"Show verbose output" default:"false" arg:"--verbose, -v, env:BT_VERBOSE"`
 	Stats               bool   `help:"Show latency stats" default:"true" arg:"--stats, env:BTS_STATS"`
 	DisableDirectAccess bool   `help:"Disable Direct Access even if available" default:"false" arg:"--disable-direct-access, -d, env:BTS_DISABLE_DIRECT_ACCESS"`
+	EnableUpdates       bool   `help:"Enable probabilistic updates to records" default:"false" arg:"--enable-updates, -u, env:BT_ENABLE_UPDATES"`
 }
 
 func checkDirectAcess(projectID, instanceID string, verbose, disableDirectAccess bool) bool {
@@ -72,7 +76,7 @@ func sliceContains(list []string, target string) bool {
 
 func writeWorkerOrder(
 	id int, recordsToProcess int, results chan<- time.Duration, rl ratelimit.Limiter, verbose bool,
-	mm *metermaid.Metermaid, project, instance, table, family string, extra int, bar *progressbar.ProgressBar) {
+	mm *metermaid.Metermaid, project, instance, table, family string, extra int, bar *progressbar.ProgressBar, enableUpdates bool) {
 
 	if verbose {
 		log.Printf("Starting write worker: %d (Generating %d records)\n", id, recordsToProcess)
@@ -109,7 +113,8 @@ func writeWorkerOrder(
 		orderID := fmt.Sprintf("ord_%d_%d", id, j)
 
 		// Random transaction amount between 1 and 99
-		amountStr := fmt.Sprintf("%d", r.Intn(99)+1)
+		amt := r.Intn(99) + 1
+		amountStr := fmt.Sprintf("%d", amt)
 
 		mut.Set(family, "amount", bigtable.Timestamp(createdTs*1000), []byte(amountStr))
 		mut.Set(family, "status", bigtable.Timestamp(createdTs*1000), []byte("completed"))
@@ -130,6 +135,21 @@ func writeWorkerOrder(
 		if _, err := tbl.ApplyBulk(ctx, rowKeys, muts); err != nil {
 			log.Fatalf("ApplyBulk Worker %d: iter %d: %v", id, j, err)
 		}
+
+		// Update Logic
+		if enableUpdates {
+			if (r.Intn(100) + 1) <= UPDATE_PERCENTAGE {
+				updateMut := bigtable.NewMutation()
+				newAmountStr := fmt.Sprintf("%d", amt+1)
+				// Applying the update to the exact same cell timestamp to overwrite the previous value
+				updateMut.Set(family, "amount", bigtable.Timestamp(createdTs*1000), []byte(newAmountStr))
+				
+				if err := tbl.Apply(ctx, rowKeys[0], updateMut); err != nil {
+					log.Fatalf("Apply Update Worker %d: iter %d: %v", id, j, err)
+				}
+			}
+		}
+
 		bar.Add(1)
 		results <- time.Since(startTime)
 		mm.Add()
@@ -199,7 +219,7 @@ func main() {
 			recordsForThisWriter++
 		}
 
-		go writeWorkerOrder(w, recordsForThisWriter, res, rl, args.Verbose, mm, args.Project, args.Instance, args.Table, args.ColumnFamily, args.ExtraColumns, bar)
+		go writeWorkerOrder(w, recordsForThisWriter, res, rl, args.Verbose, mm, args.Project, args.Instance, args.Table, args.ColumnFamily, args.ExtraColumns, bar, args.EnableUpdates)
 	}
 
 	// Process the results as they stream in
